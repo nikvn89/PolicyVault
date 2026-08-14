@@ -1,24 +1,12 @@
 import { createClient } from 'genlayer-js'
 import { studionet } from 'genlayer-js/chains'
+import { ExecutionResult, TransactionStatus } from 'genlayer-js/types'
 import { CONTRACT_ADDRESS } from './config'
 import type { Evaluation, PolicyVersion, Rule, SpendState } from './types'
 
 export type Address = `0x${string}`
 
-// Browser reads go through a same-origin proxy so StudioNet CORS cannot block them.
-// Vite proxies this path locally; Vercel rewrites the same path in production.
-const rpcStudionet = {
-  ...studionet,
-  rpcUrls: {
-    ...studionet.rpcUrls,
-    default: {
-      ...studionet.rpcUrls.default,
-      http: ['http://127.0.0.1:8787'] as [string],
-    },
-  },
-} as typeof studionet
-
-const readClient = createClient({ chain: rpcStudionet })
+const readClient = createClient({ chain: studionet })
 
 function normalize<T>(value: unknown): T {
   return value as T
@@ -29,23 +17,18 @@ export async function connectWallet(): Promise<Address> {
   const accounts = (await window.ethereum.request({ method: 'eth_requestAccounts' })) as string[]
   if (!accounts?.[0]) throw new Error('No wallet account returned.')
   const address = accounts[0] as Address
-  const client = createClient({ chain: rpcStudionet, account: address, provider: window.ethereum })
+  const client = createClient({ chain: studionet, account: address, provider: window.ethereum })
   await client.connect('studionet')
   return address
 }
 
 function writeClient(account: Address) {
   if (!window.ethereum) throw new Error('MetaMask is not installed.')
-  return createClient({ chain: rpcStudionet, account, provider: window.ethereum })
+  return createClient({ chain: studionet, account, provider: window.ethereum })
 }
 
 async function write(account: Address, functionName: string, args: unknown[]) {
   const client = writeClient(account)
-
-  // MetaMask/genlayer-js only needs to submit the transaction here.
-  // Do NOT call waitForTransactionReceipt() in the browser:
-  // StudioNet receipt polling can hit CORS / 429 and falsely report a failed UI
-  // even when the transaction is already FINALIZED on Explorer.
   const hash = await client.writeContract({
     address: CONTRACT_ADDRESS,
     functionName,
@@ -53,7 +36,17 @@ async function write(account: Address, functionName: string, args: unknown[]) {
     value: 0n,
   })
 
-  return { hash }
+  const receipt = await readClient.waitForTransactionReceipt({
+    hash,
+    status: TransactionStatus.FINALIZED,
+    fullTransaction: false,
+  })
+
+  if (receipt.txExecutionResultName === ExecutionResult.FINISHED_WITH_ERROR) {
+    throw new Error('Contract execution failed. Check the transaction in GenLayer Explorer.')
+  }
+
+  return { hash, receipt }
 }
 
 async function read<T>(functionName: string, args: unknown[]): Promise<T> {
