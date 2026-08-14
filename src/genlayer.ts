@@ -86,8 +86,8 @@ async function write(
   })
 
   // Do not poll transaction receipts in the browser.
-  // StudioNet polling can hit 429/CORS even when the tx
-  // has already finalized successfully.
+  // StudioNet may return 429/CORS during polling
+  // even when the transaction finalizes successfully.
   return { hash }
 }
 
@@ -99,7 +99,6 @@ async function read<T>(
     address: CONTRACT_ADDRESS,
     functionName,
     args,
-    stateStatus: 'accepted',
   })
 
   return normalize<T>(value)
@@ -109,19 +108,25 @@ export const createPolicy = (
   account: Address,
   totalBudget: number,
 ) =>
-  write(account, 'create_policy', [
-    totalBudget,
-  ])
+  write(
+    account,
+    'create_policy',
+    [totalBudget],
+  )
 
 export const compileVersion = (
   account: Address,
   policyId: number,
   sourceText: string,
 ) =>
-  write(account, 'compile_version', [
-    policyId,
-    sourceText,
-  ])
+  write(
+    account,
+    'compile_version',
+    [
+      policyId,
+      sourceText,
+    ],
+  )
 
 export const acceptVersion = (
   account: Address,
@@ -129,21 +134,29 @@ export const acceptVersion = (
   versionId: number,
   compiledHash: string,
 ) =>
-  write(account, 'accept_version', [
-    policyId,
-    versionId,
-    compiledHash,
-  ])
+  write(
+    account,
+    'accept_version',
+    [
+      policyId,
+      versionId,
+      compiledHash,
+    ],
+  )
 
 export const activateVersion = (
   account: Address,
   policyId: number,
   versionId: number,
 ) =>
-  write(account, 'activate_version', [
-    policyId,
-    versionId,
-  ])
+  write(
+    account,
+    'activate_version',
+    [
+      policyId,
+      versionId,
+    ],
+  )
 
 export const classifyAndEvaluate = (
   account: Address,
@@ -152,22 +165,30 @@ export const classifyAndEvaluate = (
   amount: number,
   evidence: string,
 ) =>
-  write(account, 'classify_and_evaluate', [
-    policyId,
-    description,
-    amount,
-    evidence,
-  ])
+  write(
+    account,
+    'classify_and_evaluate',
+    [
+      policyId,
+      description,
+      amount,
+      evidence,
+    ],
+  )
 
 export const approveEvaluation = (
   account: Address,
   policyId: number,
   evalId: number,
 ) =>
-  write(account, 'approve_evaluation', [
-    policyId,
-    evalId,
-  ])
+  write(
+    account,
+    'approve_evaluation',
+    [
+      policyId,
+      evalId,
+    ],
+  )
 
 export const getVersion = (
   versionId: number,
@@ -216,6 +237,8 @@ export async function getActiveVersion(
   )
 }
 
-export function explorerTx(hash: string) {
+export function explorerTx(
+  hash: string,
+) {
   return `https://explorer-studio.genlayer.com/tx/${hash}`
 }
