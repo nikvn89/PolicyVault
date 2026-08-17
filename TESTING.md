@@ -3,10 +3,38 @@
 ## Test Environment
 
 -   Network: GenLayer StudioNet
--   Contract: `0x352800986bdb0DFb9311b97eB9F6332357205822`
+-   Contract: `0x07b79A05f6Af12d14A88E50CC4A841469aa19ecE`
 -   Policy ID: `1`
 -   Compiled Version ID: `1`
 -   Total Budget: `100000 GEN`
+
+
+## Frontend Confirmation / Onboarding Regression
+
+### State-based transaction confirmation
+
+The browser does **not** poll transaction receipts. Each write is confirmed by polling the state transition that proves it finalized, through the existing RPC proxy. Poll interval: **4 seconds**. Confirmation timeout: **120 seconds**.
+
+Expected confirmation checks:
+
+- `create_policy` → the new policy ID becomes readable via `get_spend_state`.
+- `compile_version` → the new version becomes readable via `get_version`, with a compiled hash and populated rules.
+- `accept_version` → `get_version.status == ACCEPTED`.
+- `activate_version` → `get_active_version.version_id` equals the activated version.
+- `classify_and_evaluate` → `get_policy_evaluations` count increases.
+- `approve_evaluation` → the target evaluation changes from `NEEDS_APPROVAL` and has `resolved_at > 0`.
+
+The UI exposes three explicit write phases: **Submitting → Waiting for confirmation → Confirmed**. During waiting it displays the Explorer transaction link. `compile_version` also states that AI consensus typically takes 30–60 seconds. If state is not confirmed within 120 seconds, the UI shows **Still pending** rather than reporting a false failure, and tells the user to inspect the transaction before retrying.
+
+### First-time MetaMask setup
+
+`connectWallet()` uses the GenLayer Studionet connection flow. A first-time user should expect MetaMask prompts to add/switch **GenLayer Studio (chain 61999)** and install/approve the **GenLayer MetaMask Snap**.
+
+### Fresh-account GEN / gas requirement
+
+GenLayer write operations consume gas and require the signing account to have enough native GEN. Studionet's native currency is GEN. A fresh zero-GEN account therefore must be funded before it can submit PolicyVault writes. Studionet provides a built-in faucet using the **💧 button in the Studio account selector**.
+
+Verification source: official GenLayer documentation for Writing to Intelligent Contracts and Networks.
 
 ## 1. Policy Compilation
 

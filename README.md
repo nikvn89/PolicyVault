@@ -2,6 +2,22 @@
 
 **Consensus-compiled treasury policy enforcement on GenLayer.**
 
+## First-time setup
+
+PolicyVault uses the GenLayer MetaMask integration. On the first connection, MetaMask may show several prompts in sequence:
+
+1. add the **GenLayer Studio** network,
+2. switch to that network, and
+3. install/approve the **GenLayer MetaMask Snap**.
+
+These prompts are expected. Studionet uses **chain ID 61999** and **GEN** as its native currency.
+
+### Native GEN for transactions
+
+GenLayer write transactions consume gas and the signing account must have enough native GEN to pay transaction fees. A fresh account with no GEN therefore needs funding before it can submit PolicyVault write actions. On Studionet, use the built-in **💧 faucet button in the Studio account selector** to fund the account with test GEN.
+
+The frontend deliberately does not browser-poll transaction receipts. Instead, after every write it polls the contract state through the existing RPC proxy every 4 seconds, for up to 120 seconds, and confirms the exact state transition that proves the write landed. If confirmation is still pending after the timeout, the UI keeps the transaction hash/explorer link visible and warns the user not to submit a duplicate write.
+
 PolicyVault converts natural-language treasury policies into canonical
 rules through GenLayer validator consensus, then applies deterministic
 contract logic to spending decisions, caps, approvals, and persistent
@@ -139,9 +155,9 @@ Persistent Accounting / Audit Trail
 ## Deployment
 
 -   Network: GenLayer StudioNet
--   Contract address: `0x352800986bdb0DFb9311b97eB9F6332357205822`
--   GitHub: `ADD_GITHUB_URL`
--   Frontend: `ADD_VERCEL_URL`
+-   Contract address: `0x07b79A05f6Af12d14A88E50CC4A841469aa19ecE`
+-   GitHub: https://github.com/nikvn89/PolicyVault
+-   Frontend: https://policy-vault-dun.vercel.app/
 
 ## Local Frontend RPC Note
 
