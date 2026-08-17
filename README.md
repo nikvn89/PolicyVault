@@ -2,6 +2,10 @@
 
 **Consensus-compiled treasury policy enforcement on GenLayer.**
 
+## Relationship to Covenant
+
+PolicyVault is the product-tier application of the Covenant Intelligent Contract submitted separately. The contract source is identical and deliberately unchanged; the contribution here is the treasury workflow around it — policy authoring, hash-pinned acceptance, evaluation, and the on-chain audit trail — not a new consensus mechanism.
+
 ## First-time setup
 
 PolicyVault uses the GenLayer MetaMask integration. On the first connection, MetaMask may show several prompts in sequence:
