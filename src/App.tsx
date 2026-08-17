@@ -9,10 +9,14 @@ import {
   connectWallet,
   createPolicy,
   explorerTx,
+  findLatestPolicyId,
+  findLatestVersionId,
+  getActiveVersion,
   getPolicyEvaluations,
   getRules,
   getSpendState,
   getVersion,
+  waitForStateChange,
   type Address,
 } from './genlayer'
 import { OUTCOME_NAMES, VERSION_STATUS, type Evaluation, type PolicyVersion, type Rule, type SpendState } from './types'
@@ -54,6 +58,11 @@ export default function App() {
   const [status, setStatus] = useState('Ready')
   const [lastTx, setLastTx] = useState('')
   const [error, setError] = useState('')
+  const [actionState, setActionState] = useState<{
+    key: string
+    phase: 'idle' | 'submitting' | 'waiting' | 'confirmed' | 'pending' | 'error'
+    note?: string
+  }>({ key: '', phase: 'idle' })
 
   const activeVersionId = spend?.active_version || 0
 
@@ -86,29 +95,63 @@ export default function App() {
     }
   }, [])
 
-  async function run(label: string, fn: () => Promise<{ hash: string }>, refresh = true) {
+  function actionLabel(key: string, idle: string) {
+    if (actionState.key !== key) return idle
+    if (actionState.phase === 'submitting') return 'Submitting…'
+    if (actionState.phase === 'waiting') return 'Waiting for confirmation…'
+    if (actionState.phase === 'confirmed') return 'Confirmed ✓'
+    if (actionState.phase === 'pending') return 'Still pending'
+    return idle
+  }
+
+  async function runConfirmedAction<T>({
+    key,
+    submitting,
+    waiting,
+    confirmed,
+    pending,
+    submit,
+    confirm,
+    onConfirmed,
+    waitingNote,
+  }: {
+    key: string
+    submitting: string
+    waiting: string
+    confirmed: string
+    pending: string
+    submit: () => Promise<{ hash: string }>
+    confirm: () => ReturnType<typeof waitForStateChange<T>>
+    onConfirmed?: (value: T) => Promise<void> | void
+    waitingNote?: string
+  }) {
     if (busy) return
+
     setBusy(true)
     setError('')
-    setStatus(label)
+    setActionState({ key, phase: 'submitting' })
+    setStatus(submitting)
 
     try {
-      const { hash } = await fn()
+      const { hash } = await submit()
       setLastTx(hash)
+      setActionState({ key, phase: 'waiting', note: waitingNote })
+      setStatus(waiting)
 
-      // Submission succeeded. Finalization happens asynchronously on StudioNet.
-      // Avoid browser-side receipt polling because Studio RPC can return 429/CORS
-      // even while the transaction finalizes successfully.
-      setStatus('Submitted ✓ — waiting for StudioNet finalization')
+      const result = await confirm()
 
-      if (refresh && policyId) {
-        window.setTimeout(() => {
-          loadPolicy(policyId).catch(() => undefined)
-        }, 30000)
+      if (result.status === 'confirmed') {
+        await onConfirmed?.(result.value)
+        setActionState({ key, phase: 'confirmed' })
+        setStatus(confirmed)
+      } else {
+        setActionState({ key, phase: 'pending' })
+        setStatus(pending)
       }
     } catch (e) {
+      setActionState({ key, phase: 'error' })
       setError(e instanceof Error ? e.message : String(e))
-      setStatus('Submit failed')
+      setStatus('Transaction failed before state confirmation')
     } finally {
       setBusy(false)
     }
@@ -119,7 +162,7 @@ export default function App() {
       setError('')
       const a = await connectWallet()
       setAccount(a)
-      setStatus('Wallet connected')
+      setStatus('Wallet connected ✓')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -129,8 +172,26 @@ export default function App() {
     if (!account) return onConnect()
     const n = Number(budget)
     if (!Number.isInteger(n) || n <= 0) return setError('Budget must be a positive integer.')
-    await run('Creating policy — do not submit again while pending…', () => createPolicy(account, n), false)
-    setStatus('Policy created. Enter its policy ID below, then Load Policy.')
+
+    setStatus('Checking current policy state…')
+    const baseline = await findLatestPolicyId(policyId ?? (Number(policyIdInput) || 1))
+    const expectedPolicyId = baseline + 1
+
+    await runConfirmedAction<SpendState>({
+      key: 'create',
+      submitting: 'Submitting policy creation…',
+      waiting: `Transaction submitted — waiting for policy #${expectedPolicyId} to become readable…`,
+      confirmed: `Policy #${expectedPolicyId} confirmed ✓`,
+      pending: `Still pending after 120s. The transaction may still finalize — check the explorer link before submitting again.`,
+      submit: () => createPolicy(account, n),
+      confirm: () => waitForStateChange({
+        read: () => getSpendState(expectedPolicyId),
+        isDone: (state) => state.policy_id === expectedPolicyId && state.total_budget === n,
+      }),
+      onConfirmed: async () => {
+        await loadPolicy(expectedPolicyId)
+      },
+    })
   }
 
   async function onLoadPolicy() {
@@ -169,33 +230,113 @@ export default function App() {
 
   async function onCompile() {
     if (!account || !policyId) return
-    await run('Compiling with validator consensus…', () => compileVersion(account, policyId, policyText), false)
-    setStatus('Compilation submitted ✓. Wait for finalization, then Load Version.')
+
+    setStatus('Checking current version state…')
+    const baseline = await findLatestVersionId(Number(versionIdInput) || 1)
+    const expectedVersionId = baseline + 1
+
+    await runConfirmedAction<PolicyVersion>({
+      key: 'compile',
+      submitting: 'Submitting policy compilation…',
+      waiting: `Compilation submitted — waiting for version #${expectedVersionId}. AI validator consensus usually takes 30–60 seconds…`,
+      confirmed: `Version #${expectedVersionId} compiled and confirmed ✓`,
+      pending: 'Compilation is still pending after 120s. It may still finalize — use the explorer link and do not submit a duplicate write.',
+      waitingNote: 'AI validator consensus normally takes 30–60 seconds.',
+      submit: () => compileVersion(account, policyId, policyText),
+      confirm: () => waitForStateChange({
+        read: () => getVersion(expectedVersionId),
+        isDone: (v) => v.policy_id === policyId && v.compiled_hash.length > 0 && v.rule_count > 0,
+        timeoutMs: 120_000,
+      }),
+      onConfirmed: async (v) => {
+        const r = await getRules(v.version_id)
+        setVersion(v)
+        setRules(r)
+        setVersionIdInput(String(v.version_id))
+      },
+    })
   }
 
   async function onAccept() {
     if (!account || !policyId || !version) return
-    await run('Accepting compiled hash…', () => acceptVersion(account, policyId, version.version_id, version.compiled_hash), false)
-    const v = await getVersion(version.version_id)
-    setVersion(v)
-    setStatus('Accepted. Timelock started ✓')
+    const versionId = version.version_id
+
+    await runConfirmedAction<PolicyVersion>({
+      key: 'accept',
+      submitting: 'Submitting compiled-hash acceptance…',
+      waiting: `Acceptance submitted — waiting for version #${versionId} status to become ACCEPTED…`,
+      confirmed: 'Accepted and timelock started ✓',
+      pending: 'Acceptance is still pending after 120s. Check the explorer link before trying again.',
+      submit: () => acceptVersion(account, policyId, versionId, version.compiled_hash),
+      confirm: () => waitForStateChange({
+        read: () => getVersion(versionId),
+        isDone: (v) => v.status === 3,
+      }),
+      onConfirmed: (v) => setVersion(v),
+    })
   }
 
   async function onActivate() {
     if (!account || !policyId || !version) return
-    await run('Activating policy version…', () => activateVersion(account, policyId, version.version_id))
+    const versionId = version.version_id
+
+    await runConfirmedAction<Awaited<ReturnType<typeof getActiveVersion>>>({
+      key: 'activate',
+      submitting: 'Submitting policy activation…',
+      waiting: `Activation submitted — waiting for policy #${policyId} active version to become #${versionId}…`,
+      confirmed: `Version #${versionId} active ✓`,
+      pending: 'Activation is still pending after 120s. Check the explorer link before trying again.',
+      submit: () => activateVersion(account, policyId, versionId),
+      confirm: () => waitForStateChange({
+        read: () => getActiveVersion(policyId),
+        isDone: (active) => active.version_id === versionId,
+      }),
+      onConfirmed: async () => loadPolicy(policyId),
+    })
   }
 
   async function onEvaluate() {
     if (!account || !policyId) return
     const n = Number(amount)
     if (!Number.isInteger(n) || n <= 0) return setError('Amount must be a positive integer.')
-    await run('Validators are classifying the spend…', () => classifyAndEvaluate(account, policyId, description, n, evidence))
+
+    const before = await getPolicyEvaluations(policyId)
+    const beforeCount = before.length
+
+    await runConfirmedAction<Evaluation[]>({
+      key: 'evaluate',
+      submitting: 'Submitting spend for validator classification…',
+      waiting: 'Evaluation submitted — waiting for the on-chain evaluation count to increase…',
+      confirmed: 'Spend evaluation confirmed ✓',
+      pending: 'Evaluation is still pending after 120s. Check the explorer link before trying again.',
+      submit: () => classifyAndEvaluate(account, policyId, description, n, evidence),
+      confirm: () => waitForStateChange({
+        read: () => getPolicyEvaluations(policyId),
+        isDone: (items) => items.length > beforeCount,
+      }),
+      onConfirmed: async () => loadPolicy(policyId),
+    })
   }
 
   async function onApprove(evalId: number) {
     if (!account || !policyId) return
-    await run(`Approving evaluation #${evalId}…`, () => approveEvaluation(account, policyId, evalId))
+
+    await runConfirmedAction<Evaluation[]>({
+      key: `approve-${evalId}`,
+      submitting: `Submitting approval for evaluation #${evalId}…`,
+      waiting: `Approval submitted — waiting for evaluation #${evalId} to resolve…`,
+      confirmed: `Evaluation #${evalId} approval confirmed ✓`,
+      pending: `Approval #${evalId} is still pending after 120s. Check the explorer link before trying again.`,
+      submit: () => approveEvaluation(account, policyId, evalId),
+      confirm: () => waitForStateChange({
+        read: () => getPolicyEvaluations(policyId),
+        isDone: (items) => {
+          const target = items.find((item) => item.eval_id === evalId)
+          return Boolean(target && target.outcome !== 3 && target.resolved_at > 0)
+        },
+      }),
+      onConfirmed: async () => loadPolicy(policyId),
+    })
   }
 
   useEffect(() => {
@@ -222,7 +363,10 @@ export default function App() {
           <a className="ghost" href={`${EXPLORER_BASE}/address/${CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
             {shortAddress(CONTRACT_ADDRESS)} ↗
           </a>
-          <button className="primary small" onClick={onConnect}>{account ? shortAddress(account) : 'Connect MetaMask'}</button>
+          <div className="connect-stack">
+            <button className="primary small" onClick={onConnect}>{account ? shortAddress(account) : 'Connect MetaMask'}</button>
+            <span className="connect-note">First time: MetaMask may ask to add/switch GenLayer Studio (chain 61999) and install the GenLayer Snap.</span>
+          </div>
         </div>
       </header>
 
@@ -240,9 +384,13 @@ export default function App() {
         </div>
       </section>
 
-      <div className="statusline">
-        <span className={busy ? 'dot pulse' : 'dot'} /> {status}
-        {lastTx && <a href={explorerTx(lastTx)} target="_blank" rel="noreferrer">View last transaction ↗</a>}
+      <div className={`statusline phase-${actionState.phase}`}>
+        <span className={busy ? 'dot pulse' : 'dot'} />
+        <div className="status-copy">
+          <strong>{status}</strong>
+          {actionState.note && <span>{actionState.note}</span>}
+        </div>
+        {lastTx && <a href={explorerTx(lastTx)} target="_blank" rel="noreferrer">View transaction ↗</a>}
       </div>
       {error && <div className="error">{error}</div>}
 
@@ -252,7 +400,7 @@ export default function App() {
           <label>Total budget</label>
           <div className="inline">
             <input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="numeric" />
-            <button disabled={busy} onClick={onCreatePolicy}>Create Policy</button>
+            <button disabled={busy} onClick={onCreatePolicy}>{actionLabel('create', 'Create Policy')}</button>
           </div>
           <div className="divider" />
           <label>Existing policy ID</label>
@@ -283,7 +431,7 @@ export default function App() {
         <label>Natural-language policy</label>
         <textarea rows={7} value={policyText} onChange={(e) => setPolicyText(e.target.value)} />
         <div className="row-actions">
-          <button className="primary" disabled={busy || !account || !policyId} onClick={onCompile}>Compile with Consensus</button>
+          <button className="primary" disabled={busy || !account || !policyId} onClick={onCompile}>{actionLabel('compile', 'Compile with Consensus')}</button>
           <span className="hint">Max 6 clauses. Compilation creates an immutable canonical version.</span>
         </div>
       </section>
@@ -303,8 +451,8 @@ export default function App() {
               <div className="kv"><span>Unmapped</span><strong>{version.unmapped_count}</strong></div>
               <div className="hash"><span>Compiled hash</span><code>{version.compiled_hash}</code></div>
               <div className="lifecycle">
-                <button disabled={busy || version.status > 1} onClick={onAccept}>Accept Hash</button>
-                <button className="primary" disabled={busy || version.status !== 3} onClick={onActivate}>Activate</button>
+                <button disabled={busy || version.status > 1} onClick={onAccept}>{actionLabel('accept', 'Accept Hash')}</button>
+                <button className="primary" disabled={busy || version.status !== 3} onClick={onActivate}>{actionLabel('activate', 'Activate')}</button>
               </div>
               {version.status === 3 && <p className="tiny">Activation available after: {formatTime(version.activated_at)}</p>}
             </div>
@@ -338,7 +486,7 @@ export default function App() {
           </div>
         </div>
         <div className="row-actions">
-          <button className="primary" disabled={busy || !account || !policyId || !activeVersionId} onClick={onEvaluate}>Classify & Evaluate</button>
+          <button className="primary" disabled={busy || !account || !policyId || !activeVersionId} onClick={onEvaluate}>{actionLabel('evaluate', 'Classify & Evaluate')}</button>
           <span className="hint">AI only classifies economic purpose. Contract logic decides ALLOW / DENY / NEEDS_APPROVAL.</span>
         </div>
       </section>
@@ -363,7 +511,7 @@ export default function App() {
               </div>
               <p>{e.description}</p>
               <div className="eval-meta"><span>{fmt.format(e.amount)} GEN</span><span>{formatTime(e.created_at)}</span></div>
-              {e.outcome === 3 && <button disabled={busy || !account} onClick={() => onApprove(e.eval_id)}>Approve Evaluation</button>}
+              {e.outcome === 3 && <button disabled={busy || !account} onClick={() => onApprove(e.eval_id)}>{actionLabel(`approve-${e.eval_id}`, 'Approve Evaluation')}</button>}
             </div>
           ))}</div> : <div className="empty">No evaluations recorded yet.</div>}
         </div>

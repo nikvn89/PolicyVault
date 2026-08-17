@@ -10,6 +10,17 @@ import type {
 
 export type Address = `0x${string}`
 
+export type StateWaitResult<T> =
+  | { status: 'confirmed'; value: T }
+  | { status: 'pending'; lastValue?: T }
+
+export interface WaitForStateChangeOptions<T> {
+  read: () => Promise<T>
+  isDone: (value: T) => boolean
+  intervalMs?: number
+  timeoutMs?: number
+}
+
 const RPC_URL = import.meta.env.DEV
   ? 'http://127.0.0.1:8787'
   : `${window.location.origin}/genlayer-rpc`
@@ -31,6 +42,51 @@ const readClient = createClient({
 
 function normalize<T>(value: unknown): T {
   return value as T
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms))
+}
+
+/**
+ * Poll contract STATE, not transaction receipts.
+ *
+ * StudioNet receipt polling from the browser can hit CORS/rate-limit errors even
+ * after a transaction has landed. Contract reads go through the app RPC proxy,
+ * so confirmation is based on the state transition that proves each write.
+ */
+export async function waitForStateChange<T>({
+  read,
+  isDone,
+  intervalMs = 4_000,
+  timeoutMs = 120_000,
+}: WaitForStateChangeOptions<T>): Promise<StateWaitResult<T>> {
+  const startedAt = Date.now()
+  let lastValue: T | undefined
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const value = await read()
+      lastValue = value
+
+      if (isDone(value)) {
+        return { status: 'confirmed', value }
+      }
+    } catch {
+      // A read can transiently fail while StudioNet is busy. The write hash is
+      // already known, so keep polling state rather than turning a read hiccup
+      // into a false transaction failure.
+    }
+
+    const remaining = timeoutMs - (Date.now() - startedAt)
+    if (remaining <= 0) break
+    await sleep(Math.min(intervalMs, remaining))
+  }
+
+  return {
+    status: 'pending',
+    ...(lastValue === undefined ? {} : { lastValue }),
+  }
 }
 
 export async function connectWallet(): Promise<Address> {
@@ -235,6 +291,65 @@ export async function getActiveVersion(
     'get_active_version',
     [policyId],
   )
+}
+
+/**
+ * Find the last contiguous policy id readable from the contract. Policy IDs are
+ * monotonically allocated by create_policy(). This is used only to establish a
+ * pre-submit baseline so createPolicy can confirm the next policy by STATE.
+ */
+export async function findLatestPolicyId(
+  hint = 1,
+  maxSteps = 128,
+): Promise<number> {
+  let id = Math.max(1, Math.trunc(hint))
+
+  // If the hint itself does not exist, walk down to a known starting point.
+  try {
+    await getSpendState(id)
+  } catch {
+    id = 1
+  }
+
+  let latest = 0
+  for (let step = 0; step < maxSteps; step++) {
+    try {
+      await getSpendState(id)
+      latest = id
+      id += 1
+    } catch {
+      return latest
+    }
+  }
+
+  return latest
+}
+
+/** Same baseline helper for globally allocated policy-version IDs. */
+export async function findLatestVersionId(
+  hint = 1,
+  maxSteps = 256,
+): Promise<number> {
+  let id = Math.max(1, Math.trunc(hint))
+
+  try {
+    await getVersion(id)
+  } catch {
+    id = 1
+  }
+
+  let latest = 0
+  for (let step = 0; step < maxSteps; step++) {
+    try {
+      await getVersion(id)
+      latest = id
+      id += 1
+    } catch {
+      return latest
+    }
+  }
+
+  return latest
 }
 
 export function explorerTx(

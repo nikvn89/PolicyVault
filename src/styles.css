@@ -94,3 +94,17 @@ footer { display: flex; justify-content: space-between; color: #56656f; font-siz
   .statusline { flex-wrap: wrap; }
   .statusline a { margin-left: 0; }
 }
+
+.connect-stack { display: grid; gap: 6px; max-width: 360px; }
+.connect-note { color: #71808b; font-size: 11px; line-height: 1.35; text-align: right; }
+.status-copy { display: grid; gap: 3px; min-width: 0; }
+.status-copy strong { color: #c7d3da; font-size: 13px; font-weight: 700; }
+.status-copy span { color: #7f8d97; font-size: 11px; line-height: 1.4; }
+.statusline.phase-pending { border: 1px solid #5b4b21; background: #211c0e; padding: 11px 13px; border-radius: 10px; }
+.statusline.phase-confirmed { border: 1px solid #234d40; background: #0e211b; padding: 11px 13px; border-radius: 10px; }
+.statusline.phase-error { border: 1px solid #63313a; background: #26151a; padding: 11px 13px; border-radius: 10px; }
+
+@media (max-width: 760px) {
+  .connect-stack { max-width: none; }
+  .connect-note { text-align: left; }
+}
