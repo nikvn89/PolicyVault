@@ -11,7 +11,7 @@ import time
 
 # ============================================================
 # Covenant V1
-# Consensus-pinned policy enforcement for GenLayer
+# Consensus-pinned policy authorization ledger for GenLayer
 #
 # Design:
 #
@@ -147,6 +147,7 @@ OUTCOME_DENIED_CAP = 2
 OUTCOME_NEEDS_APPROVAL = 3
 OUTCOME_DENIED_INJECTION = 4
 OUTCOME_DENIED_MISMATCH = 5
+OUTCOME_DENIED_BUDGET = 6
 
 
 # ============================================================
@@ -492,6 +493,31 @@ def _category_name(category: int) -> str:
         return "ANY"
 
     return "OTHER"
+
+
+def _outcome_name(outcome: int) -> str:
+    if outcome == OUTCOME_ALLOWED:
+        return "ALLOWED"
+
+    if outcome == OUTCOME_DENIED_CATEGORY:
+        return "DENIED_CATEGORY"
+
+    if outcome == OUTCOME_DENIED_CAP:
+        return "DENIED_CAP"
+
+    if outcome == OUTCOME_NEEDS_APPROVAL:
+        return "NEEDS_APPROVAL"
+
+    if outcome == OUTCOME_DENIED_INJECTION:
+        return "DENIED_INJECTION"
+
+    if outcome == OUTCOME_DENIED_MISMATCH:
+        return "DENIED_MISMATCH"
+
+    if outcome == OUTCOME_DENIED_BUDGET:
+        return "DENIED_BUDGET"
+
+    return "UNKNOWN"
 
 
 def _basis_name(basis: int) -> str:
@@ -1404,6 +1430,12 @@ class Covenant(gl.Contract):
             if left > right:
                 return OUTCOME_DENIED_CAP
 
+        # Aggregate budget is authoritative for every spend-recording path,
+        # including owner approval re-checks with ignore_approval=True.
+        if int(policy.total_budget) > 0:
+            if int(policy.total_spent) + amount > int(policy.total_budget):
+                return OUTCOME_DENIED_BUDGET
+
         if needs_approval and not ignore_approval:
             return OUTCOME_NEEDS_APPROVAL
 
@@ -1753,98 +1785,6 @@ class Covenant(gl.Contract):
             version_id=pinned_version_id,
             category=int(evaluation.category),
             amount=int(evaluation.amount),
-            outcome=outcome,
-        ).emit()
-
-        return outcome
-
-
-    @gl.public.write
-    def record_spend(
-        self,
-        policy_id: int,
-        category: int,
-        amount: int
-    ) -> int:
-
-        policy = self._require_writer(
-            policy_id
-        )
-
-        if int(policy.active_version) == 0:
-            raise Exception(
-                "policy has no active version"
-            )
-
-        if category < 0 or category >= len(CATEGORY_NAMES):
-            raise Exception(
-                "invalid category"
-            )
-
-        if amount <= 0:
-            raise Exception(
-                "amount must be positive"
-            )
-
-        version_id = int(
-            policy.active_version
-        )
-
-        version = self._require_version(
-            version_id
-        )
-
-        if int(version.status) != STATUS_ACTIVE:
-            raise Exception(
-                "active version invalid"
-            )
-
-        outcome = self._evaluate_rules(
-            policy,
-            version,
-            category,
-            amount
-        )
-
-        if outcome == OUTCOME_ALLOWED:
-
-            policy.total_spent = (
-                int(policy.total_spent)
-                + amount
-            )
-
-            policy.spent_by_category[
-                category
-            ] = (
-                int(
-                    policy.spent_by_category[
-                        category
-                    ]
-                )
-                + amount
-            )
-
-        description = (
-            "KNOWN_CATEGORY:"
-            + _category_name(category)
-        )
-
-        eval_id = self._record_evaluation(
-            policy_id=policy_id,
-            version_id=version_id,
-            category=category,
-            amount=amount,
-            outcome=outcome,
-            description=description,
-            evidence_hash="",
-        )
-
-        ActionEvaluated(
-            policy_id,
-            eval_id,
-            version_id=version_id,
-            category=category,
-            amount=amount,
             outcome=outcome,
         ).emit()
 
@@ -2245,6 +2185,9 @@ class Covenant(gl.Contract):
 
             "amount": int(e.amount),
             "outcome": int(e.outcome),
+            "outcome_name": _outcome_name(
+                int(e.outcome)
+            ),
 
             "description": e.description,
             "evidence_hash": e.evidence_hash,
@@ -2287,6 +2230,9 @@ class Covenant(gl.Contract):
 
                 "amount": int(e.amount),
                 "outcome": int(e.outcome),
+                "outcome_name": _outcome_name(
+                    int(e.outcome)
+                ),
 
                 "description": e.description,
                 "evidence_hash": e.evidence_hash,
