@@ -357,7 +357,7 @@ export default function App() {
         <div>
           <div className="eyebrow">GENLAYER · STUDIONET</div>
           <h1>PolicyVault</h1>
-          <p className="subtitle">Consensus-compiled treasury policy enforcement</p>
+          <p className="subtitle">Consensus-compiled treasury authorization ledger</p>
         </div>
         <div className="header-actions">
           <a className="ghost" href={`${EXPLORER_BASE}/address/${CONTRACT_ADDRESS}`} target="_blank" rel="noreferrer">
@@ -373,14 +373,14 @@ export default function App() {
       <section className="hero card">
         <div>
           <span className="pill">AI interprets meaning</span>
-          <h2>Natural-language policy → canonical rules → deterministic enforcement.</h2>
-          <p>GenLayer validator consensus compiles policy language and classifies spend intent. The contract alone enforces category rules, caps, approvals, and persistent accounting.</p>
+          <h2>Natural-language policy → canonical rules → deterministic authorization ledger.</h2>
+          <p>GenLayer validator consensus compiles policy language and classifies spend intent. The contract authorizes and records decisions using category rules, per-transaction caps, category-share caps, aggregate budget, approvals, and persistent accounting. It does not custody or transfer funds.</p>
         </div>
         <div className="hero-stat">
           <span>Contract</span>
           <strong>{shortAddress(CONTRACT_ADDRESS)}</strong>
           <span>Status</span>
-          <strong className="online">FINAL DEPLOYMENT</strong>
+          <strong className="online">AUTHORIZATION LEDGER</strong>
         </div>
       </section>
 
@@ -507,7 +507,7 @@ export default function App() {
             <div className="eval" key={e.eval_id}>
               <div className="eval-top">
                 <strong>#{e.eval_id} · {e.category_name}</strong>
-                <span className={`verdict ${outcomeClass(e.outcome)}`}>{OUTCOME_NAMES[e.outcome] ?? e.outcome}</span>
+                <span className={`verdict ${outcomeClass(e.outcome)}`}>{e.outcome_name ?? OUTCOME_NAMES[e.outcome] ?? e.outcome}</span>
               </div>
               <p>{e.description}</p>
               <div className="eval-meta"><span>{fmt.format(e.amount)} GEN</span><span>{formatTime(e.created_at)}</span></div>

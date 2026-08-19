@@ -27,6 +27,7 @@ export const OUTCOME_NAMES: Record<number, string> = {
   3: 'NEEDS_APPROVAL',
   4: 'DENIED_INJECTION',
   5: 'DENIED_MISMATCH',
+  6: 'DENIED_BUDGET',
 }
 
 export interface PolicyVersion {
@@ -79,6 +80,7 @@ export interface Evaluation {
   category_name: string
   amount: number
   outcome: number
+  outcome_name?: string
   description: string
   evidence_hash: string
   created_at: number
