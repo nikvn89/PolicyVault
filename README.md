@@ -1,10 +1,6 @@
 # PolicyVault
 
-**Consensus-compiled treasury policy enforcement on GenLayer.**
-
-## Relationship to Covenant
-
-PolicyVault is the product-tier application of the Covenant Intelligent Contract submitted separately. The contract source is identical and deliberately unchanged; the contribution here is the treasury workflow around it — policy authoring, hash-pinned acceptance, evaluation, and the on-chain audit trail — not a new consensus mechanism.
+**Consensus-compiled treasury authorization and accounting ledger on GenLayer.**
 
 ## First-time setup
 
@@ -23,24 +19,23 @@ GenLayer write transactions consume gas and the signing account must have enough
 The frontend deliberately does not browser-poll transaction receipts. Instead, after every write it polls the contract state through the existing RPC proxy every 4 seconds, for up to 120 seconds, and confirms the exact state transition that proves the write landed. If confirmation is still pending after the timeout, the UI keeps the transaction hash/explorer link visible and warns the user not to submit a duplicate write.
 
 PolicyVault converts natural-language treasury policies into canonical
-rules through GenLayer validator consensus, then applies deterministic
-contract logic to spending decisions, caps, approvals, and persistent
-accounting.
+rules through GenLayer validator consensus, then records and authorizes
+spending decisions against those rules in a persistent on-chain ledger.
 
 ## Problem
 
 Treasury and grant policies are often written in natural language. Rules
 such as permitted purposes, spending caps, prohibited categories, and
 related-party approval requirements require interpretation before they
-can be enforced.
+can be evaluated consistently and recorded on-chain.
 
-Traditional smart contracts are good at deterministic enforcement, but
+Traditional smart contracts are good at deterministic rule evaluation, but
 they cannot reliably interpret arbitrary natural-language spending
 intent on their own.
 
 ## Solution
 
-PolicyVault separates interpretation from enforcement:
+PolicyVault separates interpretation from deterministic authorization and accounting:
 
 1.  A policy is created with a fixed total budget.
 2.  Natural-language policy text is compiled through GenLayer validator
@@ -48,15 +43,15 @@ PolicyVault separates interpretation from enforcement:
 3.  The resulting canonical version contains structured rules.
 4.  The compiled hash is accepted and the version is activated.
 5.  Spend requests are classified by GenLayer consensus.
-6.  Deterministic contract logic applies the active rules.
-7.  Allowed spending updates persistent category and total-budget
+6.  Deterministic contract logic evaluates the active rules, including the aggregate budget.
+7.  Only `ALLOWED` decisions update persistent category and total-spend
     accounting.
 8.  Restricted related-party spending remains pending until explicitly
     approved.
 
 This creates a clear boundary:
 
-**AI interprets meaning. Deterministic state controls consequences.**
+**AI interprets meaning. Deterministic state controls the authorization ledger.**
 
 ## Example Canonical Policy
 
@@ -79,7 +74,7 @@ It compiled into six canonical rules:
 
 The tested compilation produced **6 rules and 0 unmapped clauses**.
 
-## Enforcement Outcomes
+## Authorization Outcomes
 
 PolicyVault supports deterministic outcomes including:
 
@@ -87,6 +82,7 @@ PolicyVault supports deterministic outcomes including:
 -   `DENIED_CATEGORY`
 -   `DENIED_CAP`
 -   `NEEDS_APPROVAL`
+-   `DENIED_BUDGET`
 
 A denied or pending evaluation does not increase spend accounting. A
 related-party evaluation only becomes accounted spending after the
@@ -114,6 +110,15 @@ Final tested state:
 
 See `TESTING.md` for the test record.
 
+
+## What this contract does not do
+
+PolicyVault holds no funds and performs no transfers. It is an authorization and accounting ledger: it records whether a spend request is allowed, denied, or held for approval, and updates `total_spent` / `spent_by_category` only for allowed decisions. Treasury execution is performed by the external treasury holder using PolicyVault's on-chain decision as the authorization record.
+
+The guarantee is that no spend can be recorded as `ALLOWED` unless it passes the deterministic rule engine after consensus classification: category permission, per-transaction cap, category-share cap, approval routing, and aggregate budget.
+
+Option A from the steward request is implemented: `record_spend` has been removed. Authorized writers must use `classify_and_evaluate`, so a caller cannot self-select a category to bypass consensus classification.
+
 ## Why GenLayer
 
 The key operations in PolicyVault are subjective:
@@ -124,7 +129,7 @@ The key operations in PolicyVault are subjective:
     description.
 
 GenLayer validator consensus handles these interpretation tasks. Once
-meaning is agreed, the contract applies deterministic enforcement and
+meaning is agreed, the contract applies deterministic authorization rules and
 persistent accounting.
 
 ## Architecture
@@ -148,7 +153,7 @@ Spend Description
 Consensus Classification
         |
         v
-Deterministic Enforcement
+Deterministic Authorization / Accounting
   |        |        |        |
 ALLOW   DENY     CAP DENY   APPROVAL
         |
@@ -159,9 +164,13 @@ Persistent Accounting / Audit Trail
 ## Deployment
 
 -   Network: GenLayer StudioNet
--   Contract address: `0x07b79A05f6Af12d14A88E50CC4A841469aa19ecE`
+-   Steward-fixed contract: `0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb`
+-   Explorer: https://explorer-studio.genlayer.com/address/0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb
+-   Previous deployment (pre-fix; do not resubmit): `0x07b79A05f6Af12d14A88E50CC4A841469aa19ecE`
 -   GitHub: https://github.com/nikvn89/PolicyVault
 -   Frontend: https://policy-vault-dun.vercel.app/
+
+The frontend source in this package now defaults to the steward-fixed contract address. After pushing these files, redeploy the frontend so the live Vercel build also points to the new contract.
 
 ## Local Frontend RPC Note
 
@@ -175,5 +184,4 @@ development server.
 
 ## Project Status
 
-Final deployment and core functional flow tested successfully on
-StudioNet.
+Steward-fixed contract redeployed on StudioNet and the steward regression flow was exercised against policy `1`. See `TESTING.md` for the exact observed results and the finality note for Regression 5.

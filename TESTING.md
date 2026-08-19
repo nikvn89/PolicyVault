@@ -1,6 +1,16 @@
 # PolicyVault --- Testing
 
-## Test Environment
+## Steward-Fixed Test Deployment
+
+-   Network: GenLayer StudioNet
+-   Contract: `0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb`
+-   Explorer: https://explorer-studio.genlayer.com/address/0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb
+-   Policy ID: `1`
+-   Total Budget: `100`
+
+The historical section below is retained for the earlier pre-fix deployment. The final steward regression record is at the end of this document.
+
+## Historical Test Environment (Pre-Steward Fix)
 
 -   Network: GenLayer StudioNet
 -   Contract: `0x07b79A05f6Af12d14A88E50CC4A841469aa19ecE`
@@ -133,7 +143,7 @@ MARKETING accounting: 19000
 
 Result: **PASS**
 
-## 5. Marketing Cap Enforcement
+## 5. Marketing Cap Authorization
 
 Input:
 
@@ -228,3 +238,125 @@ Result: **PASS**
   Approval               Accounting updated     PASS
 
 **Core functional flow: PASS**
+
+
+---
+
+# Steward-Fix Regression Tests — Redeployed Contract
+
+- Network: GenLayer StudioNet
+- Contract: `0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb`
+- Explorer: https://explorer-studio.genlayer.com/address/0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb
+- Policy ID: `1`
+- Total budget: `100`
+- Active version: `1`
+- Compiled hash: `21cd0106333fdc893ace6f3b84e09e6e54c2d99b5db88c1dcdf5263894feb6a1`
+- Compiled rules: `4`
+- Unmapped clauses: `0`
+
+The deployed write schema exposes `classify_and_evaluate` and does not expose the removed public `record_spend` path. Spend category therefore comes from GenLayer consensus classification before deterministic rule evaluation.
+
+## Regression 1 — Aggregate budget denial
+
+Observed sequence:
+
+```text
+INFRASTRUCTURE 90 -> ALLOWED
+total_spent = 90
+
+INFRASTRUCTURE 20 -> outcome 6 / DENIED_BUDGET
+total_spent remains 90
+INFRASTRUCTURE remains 90
+```
+
+**Result: PASS**
+
+## Regression 2 — Budget denial before approval routing
+
+With `total_spent = 90` and `total_budget = 100`:
+
+```text
+RELATED_PARTY 20
+consensus category = RELATED_PARTY
+outcome = 6 / DENIED_BUDGET
+```
+
+The request did not become `NEEDS_APPROVAL`, proving aggregate budget denial takes priority once the request is already over budget.
+
+**Result: PASS**
+
+## Regression 3 — Pending approval cannot bypass exhausted budget
+
+Observed sequence:
+
+```text
+eval_id 4: RELATED_PARTY 10 -> NEEDS_APPROVAL
+eval_id 5: INFRASTRUCTURE 10 -> ALLOWED
+total_spent = 100
+approve_evaluation(policy_id=1, eval_id=4) -> outcome 6 / DENIED_BUDGET
+```
+
+The pending related-party amount was not added to accounting after the budget was exhausted.
+
+**Result: PASS**
+
+## Regression 4 — Caller-selected category bypass removed
+
+Submitted description:
+
+```text
+Pay 5 units for a social media advertising campaign, recorded by the requester as infrastructure hosting.
+```
+
+Consensus output:
+
+```text
+category = MARKETING
+injection_suspected = false
+stated_amount = 5
+```
+
+The caller's attempted infrastructure label did not control the category. The deployed write-method list also contains no public `record_spend` method.
+
+**Result: PASS**
+
+## Regression 5 — Per-transaction cap distinct from budget denial
+
+Submitted:
+
+```text
+INFRASTRUCTURE amount = 120
+```
+
+Observed Studio result:
+
+```text
+output = 2 / DENIED_CAP
+classification = INFRASTRUCTURE
+stated_amount = 120
+```
+
+This distinguishes the per-transaction cap failure (`2`) from aggregate budget failure (`6`). In the supplied Studio capture this transaction was `ACCEPTED / SUCCESS`; a separate `FINALIZED` capture was not provided in the chat, so finality should be rechecked in Studio/Explorer before representing this individual transaction as finalized.
+
+**Result: PASS for rule/output behavior; finality capture pending**
+
+## Final steward-fix state observed
+
+After the finalized accounting steps:
+
+```text
+total_budget = 100
+total_spent = 100
+INFRASTRUCTURE = 100
+RELATED_PARTY = 0
+```
+
+Core steward properties demonstrated:
+
+```text
+DENIED_BUDGET exists and is enforced on aggregate spend.
+Budget denial occurs before NEEDS_APPROVAL when already over budget.
+Owner approval re-check cannot bypass the current aggregate budget.
+Caller-selected category bypass is removed; consensus classification is mandatory.
+DENIED_CAP remains a distinct result from DENIED_BUDGET.
+```
