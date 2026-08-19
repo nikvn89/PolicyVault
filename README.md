@@ -184,4 +184,4 @@ development server.
 
 ## Project Status
 
-Steward-fixed contract redeployed on StudioNet and the steward regression flow was exercised against policy `1`. See `TESTING.md` for the exact observed results and the finality note for Regression 5.
+Steward-fixed contract redeployed on StudioNet and the steward regression flow was exercised against policy `1`. The live Vercel frontend was then reconfigured to the new contract and integration-tested successfully: it loaded the final accounting state, classified spend intent through consensus, rendered `DENIED_CATEGORY` and `DENIED_BUDGET` correctly, and left accounting unchanged for denied requests. See `TESTING.md` for the exact observed results and the finality note for Regression 5.

@@ -360,3 +360,82 @@ Owner approval re-check cannot bypass the current aggregate budget.
 Caller-selected category bypass is removed; consensus classification is mandatory.
 DENIED_CAP remains a distinct result from DENIED_BUDGET.
 ```
+
+---
+
+# Live Vercel Integration — Final Verification
+
+- Frontend: https://policy-vault-dun.vercel.app/
+- Contract used by the live frontend: `0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb`
+- Policy ID: `1`
+
+The live Vercel deployment was reconfigured to the steward-fixed contract and verified against the existing on-chain policy state.
+
+## Vercel 1 — Load final accounting state
+
+Observed in the live UI:
+
+```text
+INFRASTRUCTURE = 100
+total_budget = 100
+total_spent = 100
+```
+
+The frontend successfully read the redeployed contract state.
+
+**Result: PASS**
+
+## Vercel 2 — Consensus classification still controls category
+
+Submitted through the live frontend:
+
+```text
+Description: Pay 5 units for social media advertising.
+Amount: 5
+Evidence: Invoice for social media advertising services.
+```
+
+Observed audit result:
+
+```text
+Category: MARKETING
+Outcome: DENIED_CATEGORY
+```
+
+This is expected because the active test policy permits infrastructure and related-party spending, not marketing. The denied request did not increase category accounting.
+
+**Result: PASS**
+
+## Vercel 3 — Aggregate budget denial through the dApp
+
+Submitted through the live frontend:
+
+```text
+Description: Pay 5 units for production infrastructure hosting.
+Amount: 5
+Evidence: Invoice for production infrastructure hosting.
+```
+
+Observed audit result:
+
+```text
+#10 · INFRASTRUCTURE
+Outcome: DENIED_BUDGET
+```
+
+The request was classified as an allowed category, then rejected deterministically because the aggregate budget was already `100 / 100`. Infrastructure accounting remained `100`.
+
+**Result: PASS**
+
+## Live Integration Result
+
+```text
+Correct redeployed contract loaded        PASS
+On-chain policy/accounting state read     PASS
+Consensus spend classification            PASS
+DENIED_CATEGORY rendered correctly        PASS
+DENIED_BUDGET rendered correctly          PASS
+Denied spend leaves accounting unchanged  PASS
+```
+
+**PolicyVault frontend + steward-fixed contract integration: FINAL PASS**
