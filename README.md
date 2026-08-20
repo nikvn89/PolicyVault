@@ -172,16 +172,75 @@ Persistent Accounting / Audit Trail
 
 The frontend source in this package now defaults to the steward-fixed contract address. After pushing these files, redeploy the frontend so the live Vercel build also points to the new contract.
 
-## Local Frontend RPC Note
+## Local Frontend RPC
 
-During local development, direct browser requests to the StudioNet RPC
-can be affected by browser CORS behavior. The tested local setup uses a
-small local RPC proxy so the frontend communicates with the proxy and
-the proxy forwards JSON-RPC requests to StudioNet.
+Local development uses the Vite same-origin proxy:
 
-Keep the RPC proxy running in a separate terminal while running the Vite
-development server.
+```text
+http://localhost:5173/genlayer-rpc
+→ https://studio.genlayer.com/api
+```
+
+Vercel uses the same `/genlayer-rpc` path through its rewrite configuration.
+
+No separate local RPC process is required. The frontend should not point RPC calls at `http://127.0.0.1:8787`.
+
+Reads and state-confirmation checks stay on the RPC proxy path; wallet writes use MetaMask.
 
 ## Project Status
 
-Steward-fixed contract redeployed on StudioNet and the steward regression flow was exercised against policy `1`. The live Vercel frontend was then reconfigured to the new contract and integration-tested successfully: it loaded the final accounting state, classified spend intent through consensus, rendered `DENIED_CATEGORY` and `DENIED_BUDGET` correctly, and left accounting unchanged for denied requests. See `TESTING.md` for the exact observed results and the finality note for Regression 5.
+The steward-fixed contract remains deployed at:
+
+```text
+0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb
+```
+
+Earlier contract-level regression tests and the previous live Vercel integration are recorded in `TESTING.md`.
+
+The current frontend source additionally contains the Aug 20 wallet-connection fix, the corrected same-origin RPC proxy path, and the compact V7 interface. Before resubmission, the current source should be:
+
+```text
+npm run build
+→ reload/account-restore check
+→ deploy to Vercel
+→ verify wallet connect + policy load on the live deployment
+```
+
+Do not treat those current-frontend checks as PASS until they are actually run.
+
+
+## Compact workspace UI
+
+The frontend uses three tabs to avoid a long single-page workflow:
+
+```text
+Overview
+Policy & Rules
+Spend & Audit
+```
+
+Wallet, loaded policy, active version, budget, and spend remain visible in a compact summary strip.
+No contract logic, RPC logic, or state-confirmation behavior is changed by this UI refactor.
+
+
+## Brighter visual theme
+
+The compact UI now uses a brighter teal/blue visual system with:
+- soft ambient gradients;
+- glass-like panels;
+- brighter active tabs and buttons;
+- hover lift/glow states;
+- animated status sweep;
+- subtle page entrance motion;
+- progress transitions;
+- `prefers-reduced-motion` support.
+
+This is visual-only. Contract logic, wallet/RPC handling, and state confirmation are unchanged.
+
+
+## V7 product polish
+
+The compact interface now uses a brighter teal/navy palette, stronger panel separation,
+more visible active states, improved button contrast, richer ambient gradients, and
+subtle workspace/card transitions. This is a visual-only refinement; contract, wallet,
+RPC proxy, and state-confirmation logic remain unchanged.

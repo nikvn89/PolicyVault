@@ -38,7 +38,17 @@ The UI exposes three explicit write phases: **Submitting → Waiting for confirm
 
 ### First-time MetaMask setup
 
-`connectWallet()` uses the GenLayer Studionet connection flow. A first-time user should expect MetaMask prompts to add/switch **GenLayer Studio (chain 61999)** and install/approve the **GenLayer MetaMask Snap**.
+`connectWallet()` requests the account first, then performs explicit GenLayer StudioNet chain handling.
+
+Expected behavior:
+
+```text
+- Account approval succeeds → wallet becomes connected immediately.
+- GenLayer Studio uses chain ID 61999.
+- GenLayer Snap is optional for this dApp.
+- Dismissing / not installing the Snap must not clear the connected account.
+- Wallet/provider failures must render readable messages, never [object Object].
+```
 
 ### Fresh-account GEN / gas requirement
 
@@ -439,3 +449,170 @@ Denied spend leaves accounting unchanged  PASS
 ```
 
 **PolicyVault frontend + steward-fixed contract integration: FINAL PASS**
+
+---
+
+## Wallet Connection Fixes (Aug 20 steward request)
+
+Steward request:
+
+```text
+Wallet connection doesn't work, I get - in UI [object Object]
+```
+
+### Root cause
+
+Two separate defects on the same path.
+
+1. **Display.** `src/App.tsx` rendered thrown values with
+   `e instanceof Error ? e.message : String(e)`. Wallet providers reject with
+   serialised EIP-1193 objects (`{ code, message, data }`), not `Error`
+   instances, and `String(<plain object>)` is literally `"[object Object]"`.
+
+2. **Behaviour — the actual failure.** `connectWallet()` returned the address
+   only after `client.connect('studionet')` had also added the network,
+   switched to it, called `wallet_getSnaps` and installed the GenLayer Snap.
+   None of those steps is guarded inside `genlayer-js@1.1.8`. Dismissing the
+   optional Snap prompt threw, so `setAccount` never ran and the UI stayed
+   disconnected even though the wallet was connected and on the right chain.
+
+The GenLayer Snap is not required by this application: in `genlayer-js@1.1.8`
+the snap APIs appear only inside `connect()` and the `metamaskClient()`
+diagnostic helper. Reads go over HTTP through the RPC proxy and writes use
+plain `eth_sendTransaction`.
+
+### Changes
+
+```text
+src/errors.ts       NEW - normalises Error / EIP-1193 object / string / unknown,
+                          maps 4001 / 4100 / 4902 / -32002 / -32601 / -32603 to
+                          readable copy, and console.errors the raw value
+src/genlayer.ts     connectWallet() sets the account as soon as
+                          eth_requestAccounts resolves; explicit
+                          ensureStudioChain() (switch, then add on 4902);
+                          the Snap step is best-effort and cannot block
+                    write() calls ensureStudioChain() before every write
+src/App.tsx         all four catch sites use reportError(); dismissible error
+                          banner; accountsChanged listener; Connecting… state
+src/styles.css      error banner close button, max-height, scroll
+.env.example        corrected to the live contract address
+.gitignore          was a single space-separated line, so nothing was ignored
+                          (including .env) - rewritten one pattern per line
+genlayer.ts (root)  DELETED - stale duplicate that still used
+                          waitForTransactionReceipt, contradicting the README
+```
+
+### Verification status for the Aug 20 wallet fix
+
+#### Verified locally
+
+**Reject account prompt**
+
+Observed in the browser:
+
+```text
+Wallet connection failed
+You rejected the request in your wallet. (code 4001)
+```
+
+Result:
+
+```text
+PASS — readable EIP-1193 error
+PASS — no [object Object]
+PASS — Connect MetaMask button returned
+```
+
+**Local RPC proxy regression**
+
+Before the proxy correction, DevTools showed:
+
+```text
+POST http://127.0.0.1:8787/
+net::ERR_CONNECTION_REFUSED
+GenLayer RPC error: Failed to fetch
+```
+
+The frontend was corrected to use:
+
+```text
+http://localhost:5173/genlayer-rpc
+→ Vite proxy
+→ https://studio.genlayer.com/api
+```
+
+After that correction, the raw `127.0.0.1:8787` connection-refused failure no longer blocked the tested create flow.
+
+Result:
+
+```text
+PASS — obsolete 127.0.0.1:8787 path removed from current source
+```
+
+**Write while MetaMask UI showed another network**
+
+During the local retest, MetaMask visibly showed Ethereum while `Create Policy` was triggered. The previous raw RPC failure did not recur; the UI progressed to:
+
+```text
+Transaction submitted — waiting for policy #2 to become readable...
+```
+
+and the newly created policy became readable in the frontend.
+
+Result:
+
+```text
+PASS — tested write no longer fails with raw code -1 / connection refused
+NOTE — no separate screenshot of an add/switch-network prompt was captured,
+       so do not claim that specific prompt behavior was visually verified.
+```
+
+#### Still required before resubmission
+
+```text
+[ ] npm run build on the current V7 source
+    EXPECTED: PASS, 0 TypeScript errors
+
+[ ] Reload the current V7 page
+    EXPECTED: account restores; policy state can be loaded
+
+[ ] Verify Vercel environment:
+    VITE_CONTRACT_ADDRESS =
+    0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb
+
+[ ] Redeploy the current source to Vercel
+
+[ ] On live Vercel:
+    Connect MetaMask
+    EXPECTED: connected wallet displayed, no [object Object]
+
+[ ] On live Vercel:
+    Load an existing policy
+    EXPECTED: contract state loads through /genlayer-rpc
+```
+
+No contract change was made. Deployment
+`0xbEB5F2C74C2b0df15581156fd01d7dC83521CDbb` is unchanged and all earlier
+contract regression results above remain valid.
+
+## Current local proxy requirement
+
+With `npm run dev`, GenLayer RPC requests must use:
+
+```text
+http://localhost:5173/genlayer-rpc
+```
+
+and Vite must proxy that path to:
+
+```text
+https://studio.genlayer.com/api
+```
+
+The current frontend must not use:
+
+```text
+http://127.0.0.1:8787
+```
+
+unless a separate local service is intentionally introduced in a future revision.
